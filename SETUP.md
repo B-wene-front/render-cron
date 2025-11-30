@@ -47,6 +47,8 @@ Supabase Database
    VOYAGEAI_EMBEDDING_MODEL=voyage-large-2
    API_SECRET=<generate-random-secret>
    ```
+   
+   **Note:** `RENDER_EXTERNAL_URL` and `PORT` are automatically set by Render - you don't need to add them!
 
 6. **Generate API Secret**
    ```bash

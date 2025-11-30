@@ -84,7 +84,7 @@ export class ArcherAviationService {
         
         const response = await voyageai.embed({
           input: [content],
-          model: VOYAGEAI_MODEL
+          model: VOYAGEAI_MODEL!
         });
         return response.data?.[0]?.embedding || [];
       } catch (error: any) {

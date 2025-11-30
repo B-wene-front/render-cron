@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  evtol-news-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: evtol-news-service
+    ports:
+      - "${HOST_PORT:-3000}:${PORT:-3000}"
+    environment:
+      # Server Configuration
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=${PORT:-3000}
+      
+      # API Security
+      - API_SECRET=${API_SECRET}
+      - SUPABASE_CRON_SECRET=${SUPABASE_CRON_SECRET:-${API_SECRET}}
+      
+      # Supabase Configuration
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      
+      # VoyageAI Configuration
+      - VOYAGEAI_API_KEY=${VOYAGEAI_API_KEY}
+      - VOYAGEAI_EMBEDDING_MODEL=${VOYAGEAI_EMBEDDING_MODEL}
+      
+      # Puppeteer Configuration (already set in Dockerfile, but can override)
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      
+      # Optional: Debug mode
+      - DEBUG=${DEBUG:-false}
+    
+    volumes:
+      # Optional: Mount logs directory for persistence
+      - ./logs:/app/logs
+      # Optional: Mount data directory if needed
+      - ./data:/app/data
+    
+    restart: unless-stopped
+    
+    # Health check
+    # Note: Uses 0.0.0.0 or localhost inside container (both work)
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://0.0.0.0:${PORT:-3000}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits (optional, adjust based on needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    networks:
+      - evtol-network
+
+networks:
+  evtol-network:
+    driver: bridge
+

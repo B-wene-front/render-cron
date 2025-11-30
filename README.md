@@ -55,9 +55,15 @@ Required:
 - `VOYAGEAI_EMBEDDING_MODEL` - Model name (default: `voyage-large-2`)
 
 Optional:
-- `PORT` - Server port (default: 3000)
+- `PORT` - Server port (default: 3000, automatically set by Render)
 - `API_SECRET` or `SUPABASE_CRON_SECRET` - Secret key for API authentication
 - `DEBUG` - Set to `true` for debug logging
+
+**Automatically Set by Render:**
+- `RENDER_EXTERNAL_URL` - Your service's public URL (e.g., `https://evtol-news-service.onrender.com`)
+  - ✅ **You don't need to set this** - Render provides it automatically
+  - Available at runtime: `process.env.RENDER_EXTERNAL_URL`
+  - Used by the server to show correct URLs in logs
 
 ## API Endpoints
 

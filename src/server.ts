@@ -4,7 +4,7 @@ import { archerAviationService } from './services/archerAviationService';
 import logger from './utils/logger';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 const API_SECRET = process.env.API_SECRET || process.env.SUPABASE_CRON_SECRET;
 
 // Middleware
@@ -151,11 +151,32 @@ app.get('/api/services', (req: Request, res: Response) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
+  // Detect if running on Render
+  const renderUrl = process.env.RENDER_EXTERNAL_URL;
+  const isRender = !!renderUrl;
+  
+  // Build base URL for logging
+  let baseUrl: string;
+  if (isRender) {
+    // On Render, use the provided external URL
+    baseUrl = renderUrl;
+  } else {
+    // Local development - use localhost
+    baseUrl = `http://localhost:${PORT}`;
+  }
+  
   logger.info(`🚀 EVTOL News Service running on port ${PORT}`);
   logger.info(`📋 Available services: ${Object.keys(SERVICE_REGISTRY).join(', ')}`);
-  logger.info(`🔗 Health check: http://localhost:${PORT}/health`);
-  logger.info(`📚 Services list: http://localhost:${PORT}/api/services`);
+  logger.info(`🌐 Base URL: ${baseUrl}`);
+  logger.info(`🔗 Health check: ${baseUrl}/health`);
+  logger.info(`📚 Services list: ${baseUrl}/api/services`);
+  logger.info(`🔧 Service endpoints:`);
+  Object.keys(SERVICE_REGISTRY).forEach(service => {
+    logger.info(`   POST ${baseUrl}/api/run/${service}`);
+  });
+  logger.info(`   POST ${baseUrl}/api/run-all`);
+  
   if (API_SECRET) {
     logger.info(`🔐 API Secret: Configured`);
   } else {
