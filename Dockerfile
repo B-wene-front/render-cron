@@ -25,6 +25,6 @@ COPY src/ ./src/
 # Build TypeScript
 RUN npm run build
 
-# Run the cron script
-CMD ["node", "dist/index.js"]
+# Run the Express server
+CMD ["node", "dist/server.js"]
 

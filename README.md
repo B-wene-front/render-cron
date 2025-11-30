@@ -1,18 +1,27 @@
-# EVTOL News Cron Job
+# EVTOL News Web Service
 
-A unified cron job project for importing news from multiple EVTOL companies (Joby Aviation, Archer Aviation, Beta Technologies, etc.) using Puppeteer.
+A web service for importing news from multiple EVTOL companies (Joby Aviation, Archer Aviation, etc.) using Puppeteer. Designed to be called by **Supabase Cron Jobs** and hosted on **Render Web Service** (free tier).
+
+## Architecture
+
+```
+Supabase Cron Job (FREE)
+    ↓ HTTP POST
+Render Web Service (FREE - 750 hrs/month)
+    ↓ Puppeteer (heavy work)
+Joby/Archer/Beta websites
+    ↓
+Supabase Database
+```
 
 ## Features
 
-- ✅ **Multi-service support** - Run specific service or all services via `SERVICE_NAME` environment variable
-- ✅ Uses Puppeteer for full browser automation
-- ✅ Handles JavaScript-rendered content
-- ✅ Extracts content from various website structures
-- ✅ Generates embeddings using VoyageAI
-- ✅ Stores data in Supabase `news_duplicate` table
-- ✅ Minimal dependencies (~5 packages)
-- ✅ Docker-ready for Render deployment
-- ✅ **Option B**: Run specific service via environment variable
+- ✅ **Express web service** - HTTP API endpoints
+- ✅ **Supabase Cron integration** - Free cron jobs call the service
+- ✅ **Render Web Service** - Free tier hosting (750 hours/month)
+- ✅ **API security** - Secret key authentication
+- ✅ **Multi-service support** - Joby, Archer, and more
+- ✅ **Health checks** - Monitoring endpoints
 
 ## Setup
 
@@ -34,169 +43,222 @@ A unified cron job project for importing news from multiple EVTOL companies (Job
 
 4. **Test locally:**
    ```bash
-   # Run Joby Aviation (default)
-   npm run dev
-   
-   # Or run specific service
-   npm run dev:joby
-   npm run dev:archer
-   npm run dev:beta
-   npm run dev:all  # Run all services
+   npm run dev:server
    ```
 
 ## Environment Variables
 
 Required:
 - `SUPABASE_URL` - Your Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY` - Service role key (bypasses RLS) or `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` - Service role key (bypasses RLS)
 - `VOYAGEAI_API_KEY` - VoyageAI API key for embeddings
 - `VOYAGEAI_EMBEDDING_MODEL` - Model name (default: `voyage-large-2`)
 
 Optional:
-- `SERVICE_NAME` - Which service to run: `joby`, `archer`, `beta`, or `all` (default: `joby`)
+- `PORT` - Server port (default: 3000)
+- `API_SECRET` or `SUPABASE_CRON_SECRET` - Secret key for API authentication
 - `DEBUG` - Set to `true` for debug logging
+
+## API Endpoints
+
+### Health Check
+```bash
+GET /health
+```
+
+### List Services
+```bash
+GET /api/services
+```
+
+### Run Specific Service
+```bash
+POST /api/run/:service
+Headers:
+  X-API-Secret: YOUR_API_SECRET
+Body:
+  {
+    "service": "joby"  # or "archer"
+  }
+```
+
+### Run All Services
+```bash
+POST /api/run-all
+Headers:
+  X-API-Secret: YOUR_API_SECRET
+```
 
 ## Deployment on Render
 
-### Option B: Run Specific Service via Environment Variable (Recommended)
+### Step 1: Deploy Web Service
 
-You can create multiple cron jobs, each running a different service:
-
-#### Cron Job 1: Joby Aviation
-1. Go to Render Dashboard → New → Cron Job
+1. Go to Render Dashboard → New → Web Service
 2. Connect your repository
 3. Configure:
-   - **Name:** `joby-aviation-cron`
+   - **Name:** `evtol-news-service`
    - **Environment:** Docker
    - **Dockerfile Path:** `./Dockerfile`
-   - **Schedule:** `0 2 * * *` (Daily at 2 AM UTC)
    - **Build Command:** `npm install && npm run build`
-   - **Start Command:** `node dist/index.js`
+   - **Start Command:** `node dist/server.js`
+   - **Plan:** Free
+
 4. Add environment variables:
-   - `SERVICE_NAME=joby`
-   - `SUPABASE_URL=...`
-   - `SUPABASE_SERVICE_ROLE_KEY=...`
-   - `VOYAGEAI_API_KEY=...`
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `VOYAGEAI_API_KEY`
+   - `API_SECRET` (generate a random secret)
+   - `VOYAGEAI_EMBEDDING_MODEL` (optional)
 
-#### Cron Job 2: Archer Aviation
-- Same as above, but:
-  - **Name:** `archer-aviation-cron`
-  - **Schedule:** `0 3 * * *` (Daily at 3 AM UTC)
-  - **Environment Variable:** `SERVICE_NAME=archer`
+5. Deploy and note your service URL: `https://your-service.onrender.com`
 
-#### Cron Job 3: All Services
-- Same as above, but:
-  - **Name:** `evtol-news-all-cron`
-  - **Schedule:** `0 4 * * *` (Daily at 4 AM UTC)
-  - **Environment Variable:** `SERVICE_NAME=all`
+### Step 2: Set Up Supabase Cron Jobs
 
-### Available Services
+1. Go to Supabase Dashboard → SQL Editor
+2. Run the SQL from `supabase/cron-jobs.sql`
+3. Replace placeholders:
+   - `YOUR_RENDER_SERVICE_URL` → Your Render service URL
+   - `YOUR_API_SECRET` → The same `API_SECRET` from Render
 
-- `joby` - Joby Aviation news
-- `archer` - Archer Aviation news
-- `beta` - Beta Technologies (when implemented)
-- `all` - Run all services sequentially
+4. The cron jobs will now call your Render service automatically!
+
+## Supabase Cron Job Setup
+
+### Prerequisites
+
+Enable `pg_cron` extension in Supabase:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+```
+
+### Create Cron Jobs
+
+See `supabase/cron-jobs.sql` for complete examples.
+
+**Example: Joby Aviation (Daily at 2 AM UTC)**
+```sql
+SELECT cron.schedule(
+  'joby-aviation-daily',
+  '0 2 * * *',
+  $$
+  SELECT net.http_post(
+    url := 'https://your-service.onrender.com/api/run/joby',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'X-API-Secret', 'your-secret-here'
+    )
+  ) AS request_id;
+  $$
+);
+```
+
+## Testing
+
+### Test Health Endpoint
+```bash
+curl http://localhost:3000/health
+```
+
+### Test Service Endpoint
+```bash
+curl -X POST http://localhost:3000/api/run/joby \
+  -H "Content-Type: application/json" \
+  -H "X-API-Secret: your-secret" \
+  -d '{"service": "joby"}'
+```
+
+### Test from Supabase (after deployment)
+```sql
+-- Test the HTTP call
+SELECT net.http_post(
+  url := 'https://your-service.onrender.com/api/run/joby',
+  headers := jsonb_build_object(
+    'Content-Type', 'application/json',
+    'X-API-Secret', 'your-secret'
+  )
+) AS request_id;
+```
+
+## Cost Analysis
+
+### Free Tier Usage
+
+- **Supabase Cron Jobs:** FREE (unlimited)
+- **Render Web Service:** FREE (750 hours/month)
+- **Estimated usage:**
+  - Each service run: ~5-10 minutes
+  - Daily runs: ~10-20 minutes/day
+  - Monthly: ~5-10 hours/month
+  - **Well within free tier!** ✅
 
 ## Project Structure
 
 ```
-evtol-news-cron/
+render-cron/
 ├── src/
 │   ├── services/
-│   │   ├── jobyAviationService.ts    # Joby Aviation service
-│   │   ├── archerAviationService.ts  # Archer Aviation service
-│   │   └── ... (other services)
+│   │   ├── jobyAviationService.ts
+│   │   └── archerAviationService.ts
 │   ├── config/
-│   │   ├── database.ts               # Supabase client
-│   │   └── embedding.ts              # VoyageAI client
+│   │   ├── database.ts
+│   │   └── embedding.ts
 │   ├── utils/
-│   │   └── logger.ts                 # Simple logger
-│   └── index.ts                      # Entry point (supports SERVICE_NAME)
+│   │   └── logger.ts
+│   ├── server.ts              # Express web server
+│   └── index.ts               # Backward compatibility
+├── supabase/
+│   └── cron-jobs.sql          # Supabase cron job SQL
 ├── Dockerfile
 ├── package.json
-├── tsconfig.json
 └── README.md
 ```
 
-## How It Works
+## Security
 
-### Service Selection
+The API uses a secret key for authentication. Set `API_SECRET` in both:
+1. **Render environment variables**
+2. **Supabase cron job headers** (`X-API-Secret`)
 
-The cron job uses the `SERVICE_NAME` environment variable to determine which service to run:
-
-- **`SERVICE_NAME=joby`** → Runs only Joby Aviation service
-- **`SERVICE_NAME=archer`** → Runs only Archer Aviation service
-- **`SERVICE_NAME=beta`** → Runs only Beta Technologies service (when implemented)
-- **`SERVICE_NAME=all`** → Runs all services sequentially
-
-### What Each Service Does
-
-**Joby Aviation:**
-1. Initializes Puppeteer browser
-2. Navigates to Joby Aviation news page
-3. Handles cookie consent
-4. Clicks category tabs (Press Releases, Blog Posts)
-5. Clicks "Load More" to load all articles
-6. Extracts article links
-7. For each article: fetches content, generates embedding, stores in database
-
-**Archer Aviation:**
-1. Initializes Puppeteer browser
-2. Navigates to Archer news page
-3. Clicks "More News" to load all articles
-4. Extracts article links from `#news_content`
-5. For each article: fetches content, generates embedding, stores in database
-
-## Quick Reference
-
-### Running Services
-
+Generate a strong secret:
 ```bash
-# Set SERVICE_NAME environment variable
-export SERVICE_NAME=joby    # Run Joby only
-export SERVICE_NAME=archer  # Run Archer only
-export SERVICE_NAME=all     # Run all services
-
-# Then run
-npm run dev
+# Generate random secret
+openssl rand -hex 32
 ```
 
-### Render Deployment Examples
+## Monitoring
 
-**Cron Job for Joby (Daily at 2 AM):**
-- Schedule: `0 2 * * *`
-- Environment: `SERVICE_NAME=joby`
+### Check Cron Job Status
+```sql
+-- View all cron jobs
+SELECT * FROM cron.job;
 
-**Cron Job for Archer (Daily at 3 AM):**
-- Schedule: `0 3 * * *`
-- Environment: `SERVICE_NAME=archer`
+-- View cron job history
+SELECT * FROM cron.job_run_details 
+ORDER BY start_time DESC 
+LIMIT 10;
+```
 
-**Cron Job for All Services (Daily at 4 AM):**
-- Schedule: `0 4 * * *`
-- Environment: `SERVICE_NAME=all`
-
-## Cost
-
-- **Render Free Tier:** 750 hours/month
-- **Estimated usage:** ~5-10 minutes per service per run
-- **Daily runs:** ~5-10 hours/month (well within free tier)
+### Check Service Logs
+- Render Dashboard → Your Service → Logs
+- View real-time logs from the web service
 
 ## Troubleshooting
 
-### Browser fails to launch
-- Ensure Chromium dependencies are installed (handled by Dockerfile)
-- Check `PUPPETEER_EXECUTABLE_PATH` environment variable
+### Cron job not running
+- Check if `pg_cron` extension is enabled
+- Verify cron job is scheduled: `SELECT * FROM cron.job;`
+- Check Supabase logs for errors
 
-### No content extracted
-- Check if Joby website structure changed
-- Verify `.rich-text` selectors are still valid
-- Enable `DEBUG=true` for detailed logs
+### Service returns 401
+- Verify `API_SECRET` matches in both Render and Supabase
+- Check request headers include `X-API-Secret`
 
-### Rate limit errors
-- VoyageAI free tier: 3 requests per minute
-- The service includes automatic delays and retries
+### Service timeout
+- Render free tier has request timeout limits
+- Consider running services separately instead of all at once
+- Check Render logs for timeout errors
 
 ## License
 
 MIT
-
