@@ -7,7 +7,11 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "dev:server": "ts-node src/server.ts"
+    "dev:server": "ts-node src/server.ts",
+    "type-check": "tsc --noEmit",
+    "test": "npm run type-check",
+    "test:docker": "docker-compose build && docker-compose up -d && sleep 10 && curl -f http://localhost:3000/health && docker-compose down",
+    "clean": "rm -rf dist node_modules/.cache"
   },
   "keywords": [
     "cron",
