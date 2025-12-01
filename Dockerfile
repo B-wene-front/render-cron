@@ -1,9 +1,10 @@
 FROM node:18-slim
 
-# Install Chrome dependencies for Puppeteer
+# Install Chrome dependencies for Puppeteer and curl for health checks
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-sandbox \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Puppeteer to use system Chromium
@@ -16,8 +17,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies (including dev dependencies for build)
+RUN npm ci
 
 # Copy source code
 COPY src/ ./src/
