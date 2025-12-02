@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import { jobyAviationService } from './services/jobyAviationService';
 import { archerAviationService } from './services/archerAviationService';
+import { betaTechnologiesService } from './services/betaTechnologiesService';
 import logger from './utils/logger';
 
 const app = express();
@@ -15,7 +16,7 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    services: ['joby', 'archer']
+    services: ['joby', 'archer', 'beta']
   });
 });
 
@@ -50,6 +51,11 @@ const SERVICE_REGISTRY: Record<string, { service: any; method: string; name: str
     service: archerAviationService,
     method: 'processArcherSpecificData',
     name: 'Archer Aviation'
+  },
+  'beta': {
+    service: betaTechnologiesService,
+    method: 'processBetaSpecificData',
+    name: 'Beta Technologies'
   },
 };
 
