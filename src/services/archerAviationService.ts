@@ -680,7 +680,7 @@ export class ArcherAviationService {
       logger.info(`Found ${articles.length} total articles`);
       
       // Initialize duplicate tracker for early stopping
-      const duplicateTracker = new DuplicateTracker(5, 'news_duplicate');
+      const duplicateTracker = new DuplicateTracker(5, 'news');
       
       let processedCount = 0;
       let skippedCount = 0;

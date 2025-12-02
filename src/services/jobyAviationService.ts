@@ -944,7 +944,7 @@ export class JobyAviationService {
       const categoryResults = [];
       
       // Initialize duplicate tracker for early stopping (shared across categories)
-      const duplicateTracker = new DuplicateTracker(5, 'news_duplicate');
+      const duplicateTracker = new DuplicateTracker(5, 'news');
       
       let totalProcessed = 0;
       let totalSkipped = 0;

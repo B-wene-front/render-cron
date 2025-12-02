@@ -13,7 +13,7 @@ export class DuplicateTracker {
 
   /**
    * @param maxConsecutiveDuplicates - Number of consecutive duplicates before stopping (default: 5)
-   * @param tableName - Database table name to check (default: 'news_duplicate')
+   * @param tableName - Database table name to check (default: 'news')
    */
   constructor(maxConsecutiveDuplicates: number = 5, tableName: string = 'news') {
     this.maxConsecutiveDuplicates = maxConsecutiveDuplicates;
@@ -99,11 +99,11 @@ export class DuplicateTracker {
 /**
  * Factory function to create a DuplicateTracker instance
  * @param maxConsecutiveDuplicates - Number of consecutive duplicates before stopping (default: 5)
- * @param tableName - Database table name to check (default: 'news_duplicate')
+ * @param tableName - Database table name to check (default: 'news')
  */
 export function createDuplicateTracker(
   maxConsecutiveDuplicates: number = 5,
-  tableName: string = 'news_duplicate'
+  tableName: string = 'news'
 ): DuplicateTracker {
   return new DuplicateTracker(maxConsecutiveDuplicates, tableName);
 }
