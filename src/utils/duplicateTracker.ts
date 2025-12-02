@@ -15,7 +15,7 @@ export class DuplicateTracker {
    * @param maxConsecutiveDuplicates - Number of consecutive duplicates before stopping (default: 5)
    * @param tableName - Database table name to check (default: 'news_duplicate')
    */
-  constructor(maxConsecutiveDuplicates: number = 5, tableName: string = 'news_duplicate') {
+  constructor(maxConsecutiveDuplicates: number = 5, tableName: string = 'news') {
     this.maxConsecutiveDuplicates = maxConsecutiveDuplicates;
     this.tableName = tableName;
   }

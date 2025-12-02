@@ -63,7 +63,7 @@ export class JobyAviationService {
   private async recordExists(url: string): Promise<boolean> {
     try {
       const { count } = await supabase
-        .from('news_duplicate')
+        .from('news')
         .select('*', { count: 'exact', head: true })
         .eq('url', url);
 
@@ -122,7 +122,7 @@ export class JobyAviationService {
   private async storeNews(newsData: NewsData, embedding: number[]): Promise<string> {
     try {
       const { data, error } = await supabase
-        .from('news_duplicate')
+        .from('news')
         .insert([{
           url: newsData.url,
           title: newsData.title,
