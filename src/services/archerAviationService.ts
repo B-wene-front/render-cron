@@ -4,6 +4,7 @@ import { convert } from 'html-to-text';
 import { supabase } from '../config/database';
 import { voyageai, VOYAGEAI_MODEL } from '../config/embedding';
 import logger from '../utils/logger';
+import { DuplicateTracker } from '../utils/duplicateTracker';
 
 interface ArcherNewsArticle {
   url: string;
@@ -544,23 +545,34 @@ export class ArcherAviationService {
   }
 
   // Process and store a single article
-  async processAndStoreArticle(article: ArcherNewsArticle): Promise<boolean> {
+  async processAndStoreArticle(article: ArcherNewsArticle, duplicateTracker?: DuplicateTracker): Promise<{ processed: boolean; isDuplicate: boolean }> {
     try {
-      const exists = await this.recordExists(article.url);
-      if (exists) {
+      // Use duplicate tracker if provided, otherwise fall back to recordExists
+      let isDuplicate = false;
+      if (duplicateTracker) {
+        const checkResult = await duplicateTracker.processCheck(article.url);
+        isDuplicate = checkResult.isDuplicate;
+        if (checkResult.shouldStop) {
+          return { processed: false, isDuplicate: true };
+        }
+      } else {
+        isDuplicate = await this.recordExists(article.url);
+      }
+
+      if (isDuplicate) {
         logger.info(`Content already exists, skipping: ${article.url}`);
-        return false;
+        return { processed: false, isDuplicate: true };
       }
 
       const fullContent = await this.fetchArticleContentDirect(article.url);
       if (!fullContent) {
         logger.warn(`Failed to fetch content for: ${article.url}`);
-        return false;
+        return { processed: false, isDuplicate: false };
       }
 
       if (!fullContent.content || fullContent.content.trim().length === 0) {
         logger.warn(`No meaningful content found for: ${article.url}`);
-        return false;
+        return { processed: false, isDuplicate: false };
       }
 
       const wordCount = this.calculateWordCount(fullContent.content);
@@ -619,11 +631,11 @@ export class ArcherAviationService {
       const documentId = await this.storeNews(newsData, embedding);
       logger.info(`Successfully stored content: ${documentId} - ${fullContent.title}`);
 
-      return true;
+      return { processed: true, isDuplicate: false };
 
     } catch (error) {
       logger.error(`Failed to process article "${article.title}":`, error);
-      return false;
+      return { processed: false, isDuplicate: false };
     }
   }
 
@@ -667,18 +679,29 @@ export class ArcherAviationService {
       const articles = await this.extractNewsArticles('All');
       logger.info(`Found ${articles.length} total articles`);
       
+      // Initialize duplicate tracker for early stopping
+      const duplicateTracker = new DuplicateTracker(5, 'news_duplicate');
+      
       let processedCount = 0;
       let skippedCount = 0;
       let failedCount = 0;
       const allProcessedDocuments = [];
+      let stoppedEarly = false;
       
       for (const article of articles) {
         try {
           logger.info(`Processing: ${article.title}`);
           
-          const processed = await this.processAndStoreArticle(article);
+          const result = await this.processAndStoreArticle(article, duplicateTracker);
           
-          if (processed) {
+          // Check if we should stop early
+          if (duplicateTracker.shouldStop()) {
+            logger.info(`Stopping early: Reached 5 consecutive duplicates. No more new articles to process.`);
+            stoppedEarly = true;
+            break;
+          }
+          
+          if (result.processed) {
             processedCount++;
             allProcessedDocuments.push({
               url: article.url,
@@ -697,6 +720,10 @@ export class ArcherAviationService {
         }
       }
       
+      if (stoppedEarly) {
+        logger.info(`Early stop: Processed ${processedCount} new articles before hitting duplicate threshold.`);
+      }
+      
       await this.cleanupNewsBrowser();
       
       const archerSummary = {
@@ -708,6 +735,8 @@ export class ArcherAviationService {
         processed: processedCount,
         skipped: skippedCount,
         failed: failedCount,
+        stoppedEarly: stoppedEarly,
+        consecutiveDuplicates: duplicateTracker.getConsecutiveCount(),
         documents: allProcessedDocuments
       };
 

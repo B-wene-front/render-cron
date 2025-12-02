@@ -48,11 +48,22 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
       
+      - name: Determine build context
+        id: context
+        run: |
+          if [ -d "render-cron" ]; then
+            echo "context=./render-cron" >> $GITHUB_OUTPUT
+            echo "dockerfile=./render-cron/Dockerfile" >> $GITHUB_OUTPUT
+          else
+            echo "context=." >> $GITHUB_OUTPUT
+            echo "dockerfile=./Dockerfile" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./render-cron
-          file: ./render-cron/Dockerfile
+          context: ${{ steps.context.outputs.context }}
+          file: ${{ steps.context.outputs.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

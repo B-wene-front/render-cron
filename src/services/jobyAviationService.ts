@@ -4,6 +4,7 @@ import { convert } from 'html-to-text';
 import { supabase } from '../config/database';
 import { voyageai, VOYAGEAI_MODEL } from '../config/embedding';
 import logger from '../utils/logger';
+import { DuplicateTracker } from '../utils/duplicateTracker';
 
 interface JobyNewsArticle {
   url: string;
@@ -775,23 +776,34 @@ export class JobyAviationService {
   }
 
   // Process and store content from a direct URL
-  async processAndStoreDirectUrl(url: string, category?: string): Promise<boolean> {
+  async processAndStoreDirectUrl(url: string, category?: string, duplicateTracker?: DuplicateTracker): Promise<{ processed: boolean; isDuplicate: boolean }> {
     try {
-      const exists = await this.recordExists(url);
-      if (exists) {
+      // Use duplicate tracker if provided, otherwise fall back to recordExists
+      let isDuplicate = false;
+      if (duplicateTracker) {
+        const checkResult = await duplicateTracker.processCheck(url);
+        isDuplicate = checkResult.isDuplicate;
+        if (checkResult.shouldStop) {
+          return { processed: false, isDuplicate: true };
+        }
+      } else {
+        isDuplicate = await this.recordExists(url);
+      }
+
+      if (isDuplicate) {
         logger.info(`Content already exists, skipping: ${url}`);
-        return false;
+        return { processed: false, isDuplicate: true };
       }
 
       const fullContent = await this.fetchArticleContentDirect(url);
       if (!fullContent) {
         logger.warn(`Failed to fetch content for: ${url}`);
-        return false;
+        return { processed: false, isDuplicate: false };
       }
 
       if (!fullContent.title && !fullContent.content) {
         logger.warn(`No meaningful content found for: ${url}`);
-        return false;
+        return { processed: false, isDuplicate: false };
       }
 
       const wordCount = this.calculateWordCount(fullContent.content);
@@ -831,7 +843,7 @@ export class JobyAviationService {
       
       if (!fullContent.content || fullContent.content.trim().length === 0) {
         logger.error(`Cannot generate embedding: content is empty for ${url}`);
-        return false;
+        return { processed: false, isDuplicate: false };
       }
       
       const embedding = await this.generateEmbedding(fullContent.content);
@@ -877,17 +889,17 @@ export class JobyAviationService {
       const documentId = await this.storeNews(newsData, embedding);
       logger.info(`Successfully stored content: ${documentId} - ${fullContent.title || url}`);
 
-      return true;
+      return { processed: true, isDuplicate: false };
 
     } catch (error) {
       logger.error(`Failed to process URL "${url}":`, error);
-      return false;
+      return { processed: false, isDuplicate: false };
     }
   }
 
   // Process and store a single news article
-  async processAndStoreArticle(article: JobyNewsArticle): Promise<boolean> {
-    return this.processAndStoreDirectUrl(article.url, article.category);
+  async processAndStoreArticle(article: JobyNewsArticle, duplicateTracker?: DuplicateTracker): Promise<{ processed: boolean; isDuplicate: boolean }> {
+    return this.processAndStoreDirectUrl(article.url, article.category, duplicateTracker);
   }
 
   // Fetch all news article links from the news page
@@ -931,13 +943,20 @@ export class JobyAviationService {
       const categories: Array<'press-releases' | 'blog-posts'> = ['press-releases', 'blog-posts'];
       const categoryResults = [];
       
+      // Initialize duplicate tracker for early stopping (shared across categories)
+      const duplicateTracker = new DuplicateTracker(5, 'news_duplicate');
+      
       let totalProcessed = 0;
       let totalSkipped = 0;
       let totalFailed = 0;
       const allProcessedDocuments = [];
+      let stoppedEarly = false;
       
       // Process each category sequentially
       for (const category of categories) {
+        // Reset tracker for each category (optional - you can keep it shared if preferred)
+        // duplicateTracker.reset();
+        
         logger.info(`\n=== Processing category: ${category} ===`);
         
         logger.info(`Navigating to Joby news page: ${this.NEWS_BASE_URL}`);
@@ -965,9 +984,16 @@ export class JobyAviationService {
           try {
             logger.info(`[${category}] Processing: ${article.title}`);
             
-            const processed = await this.processAndStoreArticle(article);
+            const result = await this.processAndStoreArticle(article, duplicateTracker);
             
-            if (processed) {
+            // Check if we should stop early
+            if (duplicateTracker.shouldStop()) {
+              logger.info(`Stopping early in category ${category}: Reached 5 consecutive duplicates. No more new articles to process.`);
+              stoppedEarly = true;
+              break;
+            }
+            
+            if (result.processed) {
               processedCount++;
               allProcessedDocuments.push({
                 url: article.url,
@@ -985,6 +1011,12 @@ export class JobyAviationService {
             logger.error(`Failed to process article: ${article.title}`, error);
             failedCount++;
           }
+        }
+        
+        if (stoppedEarly) {
+          logger.info(`Early stop in category ${category}: Processed ${processedCount} new articles before hitting duplicate threshold.`);
+          // Break out of category loop if stopped early
+          break;
         }
         
         categoryResults.push({
@@ -1012,6 +1044,8 @@ export class JobyAviationService {
         processed: totalProcessed,
         skipped: totalSkipped,
         failed: totalFailed,
+        stoppedEarly: stoppedEarly,
+        consecutiveDuplicates: duplicateTracker.getConsecutiveCount(),
         categoryResults,
         documents: allProcessedDocuments
       };
