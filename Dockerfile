@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:22-slim
 
 # Install Chrome dependencies for Puppeteer and curl for health checks
 RUN apt-get update && apt-get install -y \
