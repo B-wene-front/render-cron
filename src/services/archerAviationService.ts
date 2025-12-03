@@ -14,7 +14,8 @@ interface ArcherNewsArticle {
 
 interface ArcherNewsContent {
   title: string;
-  content: string;
+  rawHtml: string;  // Raw HTML for database storage
+  cleanText: string; // Clean text for embedding generation
   category: string;
 }
 
@@ -501,7 +502,7 @@ export class ArcherAviationService {
         return null;
       }
 
-      // Parse HTML to clean text
+      // Parse HTML to clean text (for embedding generation only)
       const root = parse(pageData.rawHTML);
       
       const unwantedSelectors = [
@@ -530,11 +531,12 @@ export class ArcherAviationService {
         ],
       }).trim();
 
-      const finalContent = content.length >= 80 ? content : fallbackContent;
+      const cleanText = content.length >= 80 ? content : fallbackContent;
 
       return {
         title: pageData.title,
-        content: finalContent,
+        rawHtml: pageData.rawHTML,  // Store raw HTML in database
+        cleanText: cleanText,       // Use clean text for embedding
         category: pageData.category
       };
 
@@ -570,12 +572,13 @@ export class ArcherAviationService {
         return { processed: false, isDuplicate: false };
       }
 
-      if (!fullContent.content || fullContent.content.trim().length === 0) {
+      if (!fullContent.rawHtml || fullContent.rawHtml.trim().length === 0) {
         logger.warn(`No meaningful content found for: ${article.url}`);
         return { processed: false, isDuplicate: false };
       }
 
-      const wordCount = this.calculateWordCount(fullContent.content);
+      // Use clean text for word count and analysis
+      const wordCount = this.calculateWordCount(fullContent.cleanText);
 
       // Determine news type based on category
       let newsType = 'press_release';
@@ -593,26 +596,27 @@ export class ArcherAviationService {
         articleCategory = 'press_release';
       }
 
+      // Generate embedding from clean text only
       logger.info(`Generating embedding for: ${fullContent.title} (${wordCount} words)`);
-      const embedding = await this.generateEmbedding(fullContent.content);
+      const embedding = await this.generateEmbedding(fullContent.cleanText);
 
       const newsData: NewsData = {
         url: article.url,
         title: fullContent.title,
-        content: fullContent.content,
+        content: fullContent.rawHtml,  // Store raw HTML in content field
         source: 'archer_aviation',
         published_date: this.extractDateFromTitle(fullContent.title),
         news_type: newsType,
         article_category: articleCategory,
         company_name: this.COMPANY_NAME,
         publication: 'Archer Aviation',
-        tags: this.generateTags(fullContent.content),
-        sentiment: this.analyzeSentiment(fullContent.content),
-        impact_level: this.assessImpactLevel(fullContent.content),
+        tags: this.generateTags(fullContent.cleanText),  // Use clean text for analysis
+        sentiment: this.analyzeSentiment(fullContent.cleanText),
+        impact_level: this.assessImpactLevel(fullContent.cleanText),
         credibility_score: 0.95,
-        geographic_focus: this.extractGeographicFocus(fullContent.content),
+        geographic_focus: this.extractGeographicFocus(fullContent.cleanText),
         industry_focus: ['eVTOL', 'Urban Air Mobility', 'Aviation', 'Electric Aircraft'],
-        related_companies: this.extractRelatedCompanies(fullContent.content),
+        related_companies: this.extractRelatedCompanies(fullContent.cleanText),
         metadata: {
           snippet: fullContent.title,
           source: 'archer_aviation',

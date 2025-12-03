@@ -181,7 +181,8 @@ export class BetaTechnologiesService {
 
       this.page = await this.browser.newPage();
       await this.page.setViewport({ width: 1920, height: 1080 });
-      this.page.setDefaultNavigationTimeout(120000);
+      this.page.setDefaultNavigationTimeout(120000); // 120 seconds
+      this.page.setDefaultTimeout(120000); // 120 seconds for all operations
       
       await this.page.setUserAgent(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -264,23 +265,46 @@ export class BetaTechnologiesService {
     }
   }
 
-  // Crawl URL
-  private async crawlUrl(url: string): Promise<CrawledContent | null> {
+  // Crawl URL with retry logic
+  private async crawlUrl(url: string, retries: number = 2): Promise<CrawledContent | null> {
     if (!this.page) {
       await this.initializeBrowser();
     }
 
-    try {
-      logger.info(`Crawling ${url} for ${this.COMPANY_NAME}...`);
-      
-      await this.page!.goto(url, { 
-        waitUntil: 'domcontentloaded', 
-        timeout: 30000 
-      });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        if (attempt > 0) {
+          logger.info(`Retrying crawl for ${url} (attempt ${attempt + 1}/${retries + 1})...`);
+          await this.delay(5000 * attempt); // Exponential backoff
+        } else {
+          logger.info(`Crawling ${url} for ${this.COMPANY_NAME}...`);
+        }
+        
+        // Try networkidle2 first, fallback to domcontentloaded if it times out
+        let waitStrategy: 'networkidle2' | 'domcontentloaded' = 'networkidle2';
+        
+        try {
+          await this.page!.goto(url, { 
+            waitUntil: waitStrategy,
+            timeout: 120000 // 120 seconds
+          });
+        } catch (gotoError: any) {
+          // If networkidle2 times out, try with domcontentloaded (less strict)
+          if (gotoError?.name === 'TimeoutError' && waitStrategy === 'networkidle2') {
+            logger.warn(`networkidle2 timed out for ${url}, trying domcontentloaded...`);
+            waitStrategy = 'domcontentloaded';
+            await this.page!.goto(url, { 
+              waitUntil: waitStrategy,
+              timeout: 120000
+            });
+          } else {
+            throw gotoError;
+          }
+        }
 
-      await this.delay(2000);
+        await this.delay(3000); // Wait for any dynamic content to load
 
-      const content = await this.page!.evaluate(() => {
+        const content = await this.page!.evaluate(() => {
         const doc = (globalThis as any).document;
         const win = (globalThis as any).window;
         
@@ -296,32 +320,44 @@ export class BetaTechnologiesService {
           title: img.title || ''
         }));
 
-        return {
-          title,
-          h1,
-          content: textContent,
-          rawHtml,
-          metaDescription: metaDesc,
-          images,
-          wordCount: textContent.split(' ').length,
-          url: win.location.href
-        };
-      });
+          return {
+            title,
+            h1,
+            content: textContent,
+            rawHtml,
+            metaDescription: metaDesc,
+            images,
+            wordCount: textContent.split(' ').length,
+            url: win.location.href
+          };
+        });
 
-      content.content = this.cleanExtractedContent(content.rawHtml);
+        content.content = this.cleanExtractedContent(content.rawHtml);
 
-      if (!content.content || content.content.length < 100) {
-        logger.warn(`Insufficient content extracted from ${url}`);
-        return null;
+        if (!content.content || content.content.length < 100) {
+          logger.warn(`Insufficient content extracted from ${url}`);
+          return null;
+        }
+
+        logger.info(`Successfully crawled ${url} (${content.wordCount} words)`);
+        return content;
+
+      } catch (error: any) {
+        const isTimeout = error?.name === 'TimeoutError' || error?.message?.includes('timeout');
+        
+        if (isTimeout && attempt < retries) {
+          logger.warn(`Timeout error for ${url} (attempt ${attempt + 1}/${retries + 1}), will retry...`);
+          continue;
+        }
+        
+        if (attempt >= retries) {
+          logger.error(`Failed to crawl ${url} after ${retries + 1} attempts:`, error);
+          return null;
+        }
       }
-
-      logger.info(`Successfully crawled ${url} (${content.wordCount} words)`);
-      return content;
-
-    } catch (error) {
-      logger.error(`Failed to crawl ${url}:`, error);
-      return null;
     }
+    
+    return null;
   }
 
   // Store content in database
