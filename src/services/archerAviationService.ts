@@ -17,6 +17,7 @@ interface ArcherNewsContent {
   rawHtml: string;  // Raw HTML for database storage
   cleanText: string; // Clean text for embedding generation
   category: string;
+  featuredImage?: string; // Featured image URL (between title and content)
 }
 
 interface NewsData {
@@ -494,12 +495,58 @@ export class ArcherAviationService {
         // @ts-ignore - browser context
         const eyebrow = document.querySelector('.eyebrow-text')?.textContent?.trim() || '';
         
-        return { title, rawHTML, category: eyebrow };
+        // Extract featured image between title and content
+        // Find the image that appears after .secondary-headline and before .articles
+        let featuredImage = '';
+        if (titleEl && contentEl) {
+          // Get the parent container
+          const parentContainer = titleEl.parentElement;
+          if (parentContainer) {
+            // Find all images in the parent container
+            const allImages = Array.from(parentContainer.querySelectorAll('img'));
+            // Find the image that's between title and content
+            const titleIndex = Array.from(parentContainer.children).indexOf(titleEl);
+            const contentIndex = Array.from(parentContainer.children).indexOf(contentEl);
+            
+            // Look for images between title and content
+            for (let i = titleIndex + 1; i < contentIndex; i++) {
+              const child = parentContainer.children[i];
+              if (child.tagName === 'IMG') {
+                const img = child as any;
+                const src = img.src || img.getAttribute('src') || '';
+                // Filter to only include Prismic images (Archer's CDN)
+                if (src && src.includes('prismic.io')) {
+                  featuredImage = src;
+                  break;
+                }
+              }
+            }
+            
+            // Fallback: if no image found between, check all images in parent
+            if (!featuredImage) {
+              const img = parentContainer.querySelector('img');
+              if (img) {
+                const src = img.src || img.getAttribute('src') || '';
+                if (src && src.includes('prismic.io')) {
+                  featuredImage = src;
+                }
+              }
+            }
+          }
+        }
+        
+        return { title, rawHTML, category: eyebrow, featuredImage };
       });
 
       if (!pageData.title || !pageData.rawHTML) {
         logger.warn(`No content found for: ${url}`);
         return null;
+      }
+
+      // Prepend featured image to raw HTML if it exists
+      let fullRawHTML = pageData.rawHTML;
+      if (pageData.featuredImage) {
+        fullRawHTML = `<img src="${pageData.featuredImage}" alt="${pageData.title}" />\n${pageData.rawHTML}`;
       }
 
       // Parse HTML to clean text (for embedding generation only)
@@ -535,9 +582,10 @@ export class ArcherAviationService {
 
       return {
         title: pageData.title,
-        rawHtml: pageData.rawHTML,  // Store raw HTML in database
+        rawHtml: fullRawHTML,  // Store raw HTML in database (includes featured image if present)
         cleanText: cleanText,       // Use clean text for embedding
-        category: pageData.category
+        category: pageData.category,
+        featuredImage: pageData.featuredImage || undefined
       };
 
     } catch (error) {
@@ -626,7 +674,8 @@ export class ArcherAviationService {
           embedding_generated: true,
           embedding_model: VOYAGEAI_MODEL,
           table_name: 'news',
-          word_count: wordCount
+          word_count: wordCount,
+          featured_image: fullContent.featuredImage || null
         },
         word_count: wordCount,
         language: 'en'
