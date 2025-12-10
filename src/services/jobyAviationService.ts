@@ -17,11 +17,13 @@ interface JobyNewsArticle {
 interface JobyNewsContent {
   title: string;
   publishedDate: string;
-  content: string;
+  rawHtml: string;  // Raw HTML for database storage
+  cleanText: string; // Clean text for embedding generation
   author?: string;
   contactEmail?: string;
   relatedArticles?: string[];
   tags?: string[];
+  featuredImage?: string; // Featured image URL (between title and content)
 }
 
 interface NewsData {
@@ -598,6 +600,63 @@ export class JobyAviationService {
         logger.debug('Could not extract date with class locator');
       }
 
+      // Extract featured image (between title and content)
+      let featuredImage = '';
+      try {
+        featuredImage = await this.newsPage!.evaluate(() => {
+          // @ts-ignore - browser context
+          const h1 = document.querySelector('h1');
+          if (!h1) return '';
+          
+          // Find the parent container
+          // @ts-ignore - browser context
+          const parentContainer = h1.closest('main, article, .container, body') || document.body;
+          
+          // Find images after h1 and before content
+          const h1Index = Array.from(parentContainer.children).findIndex((el: any) => el.contains(h1));
+          const contentSelectors = ['.rich-text', '.transition.rich-text', 'article', 'main'];
+          let contentIndex = -1;
+          
+          for (const selector of contentSelectors) {
+            const contentEl = parentContainer.querySelector(selector);
+            if (contentEl) {
+              contentIndex = Array.from(parentContainer.children).indexOf(contentEl as any);
+              break;
+            }
+          }
+          
+          // Look for images between h1 and content
+          if (h1Index >= 0 && contentIndex > h1Index) {
+            for (let i = h1Index + 1; i < contentIndex; i++) {
+              const child = parentContainer.children[i];
+              if (child.tagName === 'IMG') {
+                const img = child as any;
+                const src = img.src || img.getAttribute('src') || '';
+                if (src && !src.startsWith('data:')) {
+                  return src;
+                }
+              }
+            }
+          }
+          
+          // Fallback: find first image after h1
+          // @ts-ignore - browser context
+          const allImages = Array.from(document.querySelectorAll('img'));
+          for (const img of allImages) {
+            const imgElement = img as any;
+            const src = imgElement.src || imgElement.getAttribute('src') || '';
+            // Node.DOCUMENT_POSITION_FOLLOWING = 4 (using numeric constant since Node is not available in evaluate context)
+            if (src && !src.startsWith('data:') && h1.compareDocumentPosition(imgElement) === 4) {
+              return src;
+            }
+          }
+          
+          return '';
+        });
+      } catch (error) {
+        logger.debug('Could not extract featured image');
+      }
+
       // Extract raw HTML content
       const contentSelectors = [
         '#ir-content',
@@ -687,6 +746,12 @@ export class JobyAviationService {
         return null;
       }
 
+      // Prepend featured image to raw HTML if it exists
+      let fullRawHTML = rawHTML;
+      if (featuredImage) {
+        fullRawHTML = `<img src="${featuredImage}" alt="${title}" />\n${rawHTML}`;
+      }
+
       // Parse HTML to clean text
       const root = parse(rawHTML);
       
@@ -749,11 +814,13 @@ export class JobyAviationService {
       return {
         title,
         publishedDate,
-        content: finalContent,
+        rawHtml: fullRawHTML,  // Store raw HTML in database (includes featured image if present)
+        cleanText: finalContent, // Use clean text for embedding
         author: author || undefined,
         contactEmail: contactEmail || undefined,
         relatedArticles: relatedArticles.length > 0 ? relatedArticles : undefined,
-        tags: tags.length > 0 ? tags : undefined
+        tags: tags.length > 0 ? tags : undefined,
+        featuredImage: featuredImage || undefined
       };
 
     } catch (error) {
@@ -801,12 +868,13 @@ export class JobyAviationService {
         return { processed: false, isDuplicate: false };
       }
 
-      if (!fullContent.title && !fullContent.content) {
+      if (!fullContent.title && !fullContent.rawHtml) {
         logger.warn(`No meaningful content found for: ${url}`);
         return { processed: false, isDuplicate: false };
       }
 
-      const wordCount = this.calculateWordCount(fullContent.content);
+      // Use clean text for word count and analysis
+      const wordCount = this.calculateWordCount(fullContent.cleanText);
 
       // Determine content type
       let articleCategory = 'press_release';
@@ -839,19 +907,20 @@ export class JobyAviationService {
         newsType = 'press_release';
       }
 
+      // Generate embedding from clean text only
       logger.info(`Generating embedding for: ${fullContent.title || url} (${wordCount} words)`);
       
-      if (!fullContent.content || fullContent.content.trim().length === 0) {
-        logger.error(`Cannot generate embedding: content is empty for ${url}`);
+      if (!fullContent.cleanText || fullContent.cleanText.trim().length === 0) {
+        logger.error(`Cannot generate embedding: clean text is empty for ${url}`);
         return { processed: false, isDuplicate: false };
       }
       
-      const embedding = await this.generateEmbedding(fullContent.content);
+      const embedding = await this.generateEmbedding(fullContent.cleanText);
 
       const newsData: NewsData = {
         url: url,
         title: fullContent.title || 'Joby Aviation Content',
-        content: fullContent.content,
+        content: fullContent.rawHtml,  // Store raw HTML in content field
         source: 'joby_aviation',
         published_date: fullContent.publishedDate ? this.parseJobyDate(fullContent.publishedDate) : new Date(),
         news_type: newsType,
@@ -860,12 +929,12 @@ export class JobyAviationService {
         author: fullContent.author,
         publication: 'Joby Aviation',
         tags: fullContent.tags || [],
-        sentiment: this.analyzeSentiment(fullContent.content),
-        impact_level: this.assessImpactLevel(fullContent.content),
+        sentiment: this.analyzeSentiment(fullContent.cleanText),  // Use clean text for analysis
+        impact_level: this.assessImpactLevel(fullContent.cleanText),
         credibility_score: 0.95,
-        geographic_focus: this.extractGeographicFocus(fullContent.content),
+        geographic_focus: this.extractGeographicFocus(fullContent.cleanText),
         industry_focus: ['eVTOL', 'Urban Air Mobility', 'Aviation', 'Electric Aircraft'],
-        related_companies: this.extractRelatedCompanies(fullContent.content),
+        related_companies: this.extractRelatedCompanies(fullContent.cleanText),
         press_contact: fullContent.contactEmail ? { email: fullContent.contactEmail } : undefined,
         metadata: {
           snippet: fullContent.title || url,
@@ -880,7 +949,8 @@ export class JobyAviationService {
           embedding_model: VOYAGEAI_MODEL,
           table_name: 'news',
           word_count: wordCount,
-          related_articles: fullContent.relatedArticles
+          related_articles: fullContent.relatedArticles,
+          featured_image: fullContent.featuredImage || null
         },
         word_count: wordCount,
         language: 'en'
